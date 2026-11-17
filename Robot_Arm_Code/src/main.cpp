@@ -55,7 +55,7 @@ volatile bool timer20msFlag = false;
 // ==================================================
 
 float theta[NUM_SERVOS] = {
-    0, 0, 45, 0, 0
+    0, 0, 45, 45, 0
 };
 
 float thetadot[NUM_SERVOS] = {
@@ -297,7 +297,7 @@ void loop()
         // angle_limit = false;
     }
 
-    if(millis() - tt < 2000) {
+    if(millis() - tt < 2100) {
         r_ = -60.0f;
         z_ = 0.0f;
         alpha_ = 0.0f;
