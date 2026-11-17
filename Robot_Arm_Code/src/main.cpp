@@ -342,6 +342,729 @@
 
 
 
+//--------------------------=====================------------------------==========================----------------------------========================-----------------------=========================
+
+
+
+
+//--------------------------=====================------------------------==========================----------------------------========================-----------------------=========================
+
+
+
+// #include <Arduino.h>
+// #include <Wire.h>
+// #include <Adafruit_PWMServoDriver.h>
+// #include <math.h>
+
+
+// // ============================================================
+// // ROBOT CONFIGURATION
+// // ============================================================
+
+// #define NUM_SERVOS 5
+
+// #define I2C_SDA 8
+// #define I2C_SCL 9
+
+// #define PCA9685_ADDRESS 0x40
+
+// #define SERVO_FREQ 50
+
+// #define SERVO_MIN_US 500
+// #define SERVO_MAX_US 2500
+
+// #define CYCLE_TIME 0.02f
+
+// // Link dimensions (mm)
+
+// const float d1 = 83.42f;
+// const float a2 = 101.95f;
+// const float a3 = 61.95f;
+// const float a4 = 72.00f;
+
+
+// // ============================================================
+// // SERVO CONFIGURATION
+// // ============================================================
+
+// Adafruit_PWMServoDriver pwm =
+//     Adafruit_PWMServoDriver(PCA9685_ADDRESS);
+
+// const int servoChannels[NUM_SERVOS] = {
+//     0, 1, 2, 3, 4
+// };
+
+// // Servo offsets
+
+// const float offset[NUM_SERVOS] = {90.0f, 54.0f, -160.0f, 106.0f, 90.0f};
+
+// // Gripper physical servo angles
+// // Adjust these according to your gripper mechanism.
+
+// #define GRIPPER_OPEN_DEG    30.0f
+// #define GRIPPER_CLOSED_DEG  75.0f
+
+
+// // ============================================================
+// // JOINT VARIABLES
+// // ============================================================
+
+// // Initial logical joint angles.
+// // Set these to the actual physical starting configuration.
+// // The example configuration has alpha = 0 degrees.
+
+// float theta[NUM_SERVOS] = {
+//     0.0f,
+//     30.0f,
+//     60.0f,
+//     0.0f,
+//     0.0f
+// };
+
+// float thetadot[NUM_SERVOS] = {
+//     0, 0, 0, 0, 0
+// };
+
+
+// // ============================================================
+// // CYLINDRICAL POSITION STRUCTURE
+// // ============================================================
+
+// struct CylindricalPosition
+// {
+//     float r;
+//     float base;
+//     float z;
+//     float alpha;
+// };
+
+
+// // ============================================================
+// // TARGET POSITIONS
+// // ============================================================
+
+// const CylindricalPosition START_POS = {
+//     100.0f,
+//     0.0f,
+//     200.0f,
+//     0.0f
+// };
+
+// const CylindricalPosition PICKUP_POS = {
+//     200.0f,
+//     0.0f,
+//     10.0f,
+//     0.0f
+// };
+
+// const CylindricalPosition DROPOFF_POS = {
+//     100.0f,
+//     90.0f,
+//     220.0f,
+//     0.0f
+// };
+
+
+// // ============================================================
+// // MOTION CONFIGURATION
+// // ============================================================
+
+// // Movement durations
+
+// #define START_MOVE_TIME     3000
+// #define PICKUP_MOVE_TIME    2500
+// #define DROPOFF_MOVE_TIME   3000
+
+// #define GRIPPER_DELAY       1000
+
+// // Select elbow configuration
+// // Change to false if the other configuration is needed.
+
+// #define ELBOW_POSITIVE true
+
+
+// // ============================================================
+// // TIMER CONFIGURATION
+// // ============================================================
+
+// hw_timer_t *timer = NULL;
+
+// volatile bool timer20msFlag = false;
+
+
+// void IRAM_ATTR onTimer()
+// {
+//     timer20msFlag = true;
+// }
+
+
+// // ============================================================
+// // MOTION STATE MACHINE
+// // ============================================================
+
+// enum RobotState
+// {
+//     MOVE_TO_START,
+//     MOVE_TO_PICKUP,
+//     CLOSE_GRIPPER,
+//     MOVE_TO_DROPOFF,
+//     OPEN_GRIPPER,
+//     FINISHED,
+//     ERROR
+// };
+
+// RobotState state;
+
+// bool motionActive = false;
+
+// uint32_t motionStartTime = 0;
+// uint32_t stateStartTime = 0;
+
+// uint32_t motionDuration = 0;
+
+// CylindricalPosition motionStart;
+// CylindricalPosition motionTarget;
+
+
+// // ============================================================
+// // SERVO INITIALIZATION
+// // ============================================================
+
+// void initServos()
+// {
+//     Wire.begin(I2C_SDA, I2C_SCL);
+
+//     pwm.begin();
+
+//     pwm.setPWMFreq(SERVO_FREQ);
+
+//     delay(10);
+
+//     Serial.println("PCA9685 initialized!");
+// }
+
+
+// // ============================================================
+// // SERVO CONTROL
+// // ============================================================
+
+// void setServoAngle(int index, float angle)
+// {
+//     if (index < 0 || index >= NUM_SERVOS)
+//         return;
+
+//     angle = constrain(angle, 0.0f, 180.0f);
+
+//     float pulseWidth = SERVO_MIN_US +
+//         (angle / 180.0f) *
+//         (SERVO_MAX_US - SERVO_MIN_US);
+
+//     pwm.writeMicroseconds(
+//         servoChannels[index],
+//         (uint16_t)pulseWidth
+//     );
+// }
+
+
+// // ============================================================
+// // UPDATE JOINT ANGLES
+// // ============================================================
+
+// void setJointAngles()
+// {
+//     setServoAngle(0, theta[0] + offset[0]);
+
+//     setServoAngle(1, theta[1] + offset[1]);
+
+//     setServoAngle(2, -(theta[2] + offset[2]));
+
+//     setServoAngle(3, theta[3] + offset[3]);
+// }
+
+
+// // ============================================================
+// // GRIPPER CONTROL
+// // ============================================================
+
+// void openGripper()
+// {
+//     setServoAngle(4, GRIPPER_OPEN_DEG);
+
+//     Serial.println("Gripper OPEN");
+// }
+
+
+// void closeGripper()
+// {
+//     setServoAngle(4, GRIPPER_CLOSED_DEG);
+
+//     Serial.println("Gripper CLOSED");
+// }
+
+
+// // ============================================================
+// // FORWARD KINEMATICS
+// // ============================================================
+
+// CylindricalPosition forwardKinematics()
+// {
+//     float q1 = theta[1] * DEG_TO_RAD;
+
+//     float q2 = theta[2] * DEG_TO_RAD;
+
+//     float q3 = theta[3] * DEG_TO_RAD;
+
+//     float phi1 = q1;
+
+//     float phi2 = q1 + q2;
+
+//     float phi3 = q1 + q2 + q3;
+
+
+//     CylindricalPosition position;
+
+//     position.r =
+//         a2 * sinf(phi1) +
+//         a3 * sinf(phi2) +
+//         a4 * sinf(phi3);
+
+//     position.z =
+//         d1 +
+//         a2 * cosf(phi1) +
+//         a3 * cosf(phi2) +
+//         a4 * cosf(phi3);
+
+//     position.base = theta[0];
+
+//     position.alpha =
+//         theta[1] + theta[2] + theta[3] - 90.0f;
+
+//     return position;
+// }
+
+
+// // ============================================================
+// // INVERSE KINEMATICS
+// // ============================================================
+
+// bool inverseKinematics(CylindricalPosition pos, float result[4])
+// {
+//     // ----------------------------------------
+//     // 1. Calculate wrist position
+//     // ----------------------------------------
+
+//     float alphaRad = pos.alpha * DEG_TO_RAD;
+
+//     float rw = pos.r - a4 * cosf(alphaRad);
+
+//     float zw = pos.z - d1 + a4 * sinf(alphaRad);
+
+
+//     // ----------------------------------------
+//     // 2. Calculate elbow angle
+//     // ----------------------------------------
+
+//     float D = (rw * rw + zw * zw - a2 * a2 - a3 * a3) / (2.0f * a2 * a3);
+
+
+//     // Workspace check
+
+//     if (D < -1.0f || D > 1.0f)
+//     {
+//         return false;
+//     }
+
+//     D = constrain(D, -1.0f, 1.0f);
+
+//     float q2 = acosf(D);
+
+//     if (!ELBOW_POSITIVE)
+//     {
+//         q2 = -q2;
+//     }
+
+
+//     // ----------------------------------------
+//     // 3. Calculate shoulder angle
+//     // ----------------------------------------
+
+//     float q1 = atan2f(rw, zw) - atan2f(a3 * sinf(q2), a2 + a3 * cosf(q2));
+
+
+//     // ----------------------------------------
+//     // 4. Calculate wrist angle
+//     // ----------------------------------------
+
+//     float q3 = 90.0f + pos.alpha - (q1 + q2) * RAD_TO_DEG;
+
+
+//     // ----------------------------------------
+//     // 5. Convert to degrees
+//     // ----------------------------------------
+
+//     float baseDeg = pos.base;
+
+//     float shoulderDeg = q1 * RAD_TO_DEG;
+
+//     float elbowDeg = q2 * RAD_TO_DEG;
+
+//     float wristDeg = q3;
+
+
+//     // ----------------------------------------
+//     // 6. Calculate physical servo angles
+//     // ----------------------------------------
+
+//     float servoAngle[4];
+
+//     servoAngle[0] = baseDeg + offset[0];
+
+//     servoAngle[1] = shoulderDeg + offset[1];
+
+//     servoAngle[2] = -(elbowDeg + offset[2]);
+
+//     servoAngle[3] = wristDeg + offset[3];
+
+
+//     // ----------------------------------------
+//     // 7. Servo limit checking
+//     // ----------------------------------------
+
+//     for (int i = 0; i < 4; i++)
+//     {
+//         if (servoAngle[i] < 0.0f ||
+//             servoAngle[i] > 180.0f)
+//         {
+//             return false;
+//         }
+//     }
+
+
+//     // ----------------------------------------
+//     // 8. Store joint angles
+//     // ----------------------------------------
+
+//     result[0] = baseDeg;
+
+//     result[1] = shoulderDeg;
+
+//     result[2] = elbowDeg;
+
+//     result[3] = wristDeg;
+
+//     return true;
+// }
+
+
+// // ============================================================
+// // APPLY INVERSE KINEMATICS
+// // ============================================================
+
+// bool setCartesianPosition(CylindricalPosition pos)
+// {
+//     float newAngles[4];
+
+//     if (!inverseKinematics(pos, newAngles))
+//     {
+//         return false;
+//     }
+
+//     for (int i = 0; i < 4; i++)
+//     {
+//         theta[i] = newAngles[i];
+//     }
+
+//     setJointAngles();
+
+//     return true;
+// }
+
+
+// // ============================================================
+// // ANGLE INTERPOLATION
+// // ============================================================
+
+// float interpolateAngle(float start, float target, float t)
+// {
+//     float difference = target - start;
+
+//     // Shortest angular path
+
+//     while (difference > 180.0f)
+//         difference -= 360.0f;
+
+//     while (difference < -180.0f)
+//         difference += 360.0f;
+
+//     return start + difference * t;
+// }
+
+
+// // ============================================================
+// // BEGIN CARTESIAN MOVEMENT
+// // ============================================================
+
+// void beginMovement(CylindricalPosition target, uint32_t duration, RobotState newState)
+// {
+//     motionStart = forwardKinematics();
+
+//     motionTarget = target;
+
+//     motionDuration = duration;
+
+//     motionStartTime = millis();
+
+//     state = newState;
+
+//     motionActive = true;
+
+//     Serial.println("Starting Cartesian movement...");
+// }
+
+
+// // ============================================================
+// // SMOOTHSTEP TRAJECTORY
+// // ============================================================
+
+// float smoothStep(float t)
+// {
+//     return 3.0f * t * t - 2.0f * t * t * t;
+// }
+
+
+// // ============================================================
+// // UPDATE CARTESIAN TRAJECTORY
+// // ============================================================
+
+// void updateMovement()
+// {
+//     uint32_t elapsed = millis() - motionStartTime;
+
+//     float t = (float)elapsed / motionDuration;
+
+//     if (t >= 1.0f)
+//         t = 1.0f;
+
+//     float s = smoothStep(t);
+
+
+//     CylindricalPosition current;
+
+//     current.r = motionStart.r + (motionTarget.r - motionStart.r) * s;
+
+//     current.base = interpolateAngle(motionStart.base, motionTarget.base, s);
+
+//     current.z = motionStart.z + (motionTarget.z - motionStart.z) * s;
+
+//     current.alpha = motionStart.alpha + (motionTarget.alpha - motionStart.alpha) * s;
+
+
+//     // Calculate joint angles using IK
+
+//     if (!setCartesianPosition(current))
+//     {
+//         Serial.println("ERROR: IK failed during trajectory!");
+
+//         motionActive = false;
+
+//         state = ERROR;
+
+//         return;
+//     }
+
+
+//     // Movement completed
+
+//     if (t >= 1.0f)
+//     {
+//         motionActive = false;
+
+//         Serial.println("Movement completed!");
+
+//         switch (state)
+//         {
+//             case MOVE_TO_START:
+
+//                 beginMovement(
+//                     PICKUP_POS,
+//                     PICKUP_MOVE_TIME,
+//                     MOVE_TO_PICKUP
+//                 );
+
+//                 break;
+
+
+//             case MOVE_TO_PICKUP:
+
+//                 closeGripper();
+
+//                 stateStartTime = millis();
+
+//                 state = CLOSE_GRIPPER;
+
+//                 break;
+
+
+//             case MOVE_TO_DROPOFF:
+
+//                 openGripper();
+
+//                 stateStartTime = millis();
+
+//                 state = OPEN_GRIPPER;
+
+//                 break;
+
+
+//             default:
+//                 break;
+//         }
+//     }
+// }
+
+
+// // ============================================================
+// // SETUP
+// // ============================================================
+
+// void setup()
+// {
+//     Serial.begin(115200);
+
+//     Serial.println();
+
+//     Serial.println("================================");
+//     Serial.println("4-DOF ROBOT ARM CONTROLLER");
+//     Serial.println("================================");
+
+
+//     // Initialize PCA9685
+
+//     initServos();
+
+
+//     // Set initial joint position
+
+//     setJointAngles();
+
+
+//     // Open gripper
+
+//     openGripper();
+
+
+//     // Initialize hardware timer
+
+//     timer = timerBegin(1000000);
+
+//     timerAttachInterrupt(timer, &onTimer);
+
+//     timerAlarm(timer, 20000, true, 0);
+
+
+//     Serial.println("20ms control loop started!");
+
+//     delay(1000);
+
+
+//     // Start pick-and-place sequence
+
+//     beginMovement(
+//         START_POS,
+//         START_MOVE_TIME,
+//         MOVE_TO_START
+//     );
+// }
+
+
+// // ============================================================
+// // MAIN LOOP
+// // ============================================================
+
+// void loop()
+// {
+//     // ----------------------------------------
+//     // 20ms control loop
+//     // ----------------------------------------
+
+//     if (timer20msFlag)
+//     {
+//         timer20msFlag = false;
+
+//         if (motionActive)
+//         {
+//             updateMovement();
+//         }
+//     }
+
+
+//     // ----------------------------------------
+//     // Gripper closing delay
+//     // ----------------------------------------
+
+//     if (state == CLOSE_GRIPPER)
+//     {
+//         if (millis() - stateStartTime >= GRIPPER_DELAY)
+//         {
+//             beginMovement(
+//                 DROPOFF_POS,
+//                 DROPOFF_MOVE_TIME,
+//                 MOVE_TO_DROPOFF
+//             );
+//         }
+//     }
+
+
+//     // ----------------------------------------
+//     // Gripper opening delay
+//     // ----------------------------------------
+
+//     if (state == OPEN_GRIPPER)
+//     {
+//         if (millis() - stateStartTime >= GRIPPER_DELAY)
+//         {
+//             state = FINISHED;
+
+//             Serial.println();
+//             Serial.println("==============================");
+//             Serial.println("PICK AND PLACE COMPLETED!");
+//             Serial.println("==============================");
+//         }
+//     }
+
+
+//     // ----------------------------------------
+//     // Error handling
+//     // ----------------------------------------
+
+//     if (state == ERROR)
+//     {
+//         // Stop generating new movement commands.
+
+//         motionActive = false;
+//     }
+// }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -353,7 +1076,7 @@
 
 
 // ============================================================
-// ROBOT CONFIGURATION
+// 1. ROBOT CONFIGURATION
 // ============================================================
 
 #define NUM_SERVOS 5
@@ -370,6 +1093,7 @@
 
 #define CYCLE_TIME 0.02f
 
+
 // Link dimensions (mm)
 
 const float d1 = 83.42f;
@@ -379,7 +1103,7 @@ const float a4 = 72.00f;
 
 
 // ============================================================
-// SERVO CONFIGURATION
+// 2. PCA9685 CONFIGURATION
 // ============================================================
 
 Adafruit_PWMServoDriver pwm =
@@ -389,24 +1113,28 @@ const int servoChannels[NUM_SERVOS] = {
     0, 1, 2, 3, 4
 };
 
-// Servo offsets
+
+// Servo calibration offsets
 
 const float offset[NUM_SERVOS] = {90.0f, 54.0f, -160.0f, 106.0f, 90.0f};
 
-// Gripper physical servo angles
-// Adjust these according to your gripper mechanism.
+
+// Gripper positions (physical servo angles)
 
 #define GRIPPER_OPEN_DEG    30.0f
 #define GRIPPER_CLOSED_DEG  75.0f
 
 
 // ============================================================
-// JOINT VARIABLES
+// 3. JOINT VARIABLES
 // ============================================================
 
-// Initial logical joint angles.
-// Set these to the actual physical starting configuration.
-// The example configuration has alpha = 0 degrees.
+// Initial joint configuration.
+// theta[0] = base
+// theta[1] = shoulder
+// theta[2] = elbow
+// theta[3] = wrist
+// theta[4] = gripper (not included in kinematics)
 
 float theta[NUM_SERVOS] = {
     0.0f,
@@ -422,8 +1150,16 @@ float thetadot[NUM_SERVOS] = {
 
 
 // ============================================================
-// CYLINDRICAL POSITION STRUCTURE
+// 4. CARTESIAN POSITION STRUCTURES
 // ============================================================
+
+struct CartesianXYZ
+{
+    float x;
+    float y;
+    float z;
+};
+
 
 struct CylindricalPosition
 {
@@ -435,8 +1171,12 @@ struct CylindricalPosition
 
 
 // ============================================================
-// TARGET POSITIONS
+// 5. TARGET POSITIONS
 // ============================================================
+
+// All distances are in mm.
+// All angles are in degrees.
+// Alpha = 0 means the orientation specified by your report.
 
 const CylindricalPosition START_POS = {
     100.0f,
@@ -445,6 +1185,7 @@ const CylindricalPosition START_POS = {
     0.0f
 };
 
+
 const CylindricalPosition PICKUP_POS = {
     200.0f,
     0.0f,
@@ -452,8 +1193,9 @@ const CylindricalPosition PICKUP_POS = {
     0.0f
 };
 
+
 const CylindricalPosition DROPOFF_POS = {
-    100.0f,
+    150.0f,
     90.0f,
     220.0f,
     0.0f
@@ -461,40 +1203,50 @@ const CylindricalPosition DROPOFF_POS = {
 
 
 // ============================================================
-// MOTION CONFIGURATION
+// 6. TRAJECTORY CONFIGURATION
 // ============================================================
 
-// Movement durations
+// Cartesian velocity limit (mm/s)
 
-#define START_MOVE_TIME     3000
-#define PICKUP_MOVE_TIME    2500
-#define DROPOFF_MOVE_TIME   3000
+#define CARTESIAN_MAX_VELOCITY 400.0f
 
-#define GRIPPER_DELAY       1000
+// Cartesian acceleration limit (mm/s^2)
+
+#define CARTESIAN_MAX_ACCEL 400.0f
+
+// Gripper delay (ms)
+
+#define GRIPPER_DELAY 1000
+
 
 // Select elbow configuration
-// Change to false if the other configuration is needed.
 
 #define ELBOW_POSITIVE true
 
 
 // ============================================================
-// TIMER CONFIGURATION
+// 7. TIMER CONFIGURATION
 // ============================================================
 
 hw_timer_t *timer = NULL;
 
-volatile bool timer20msFlag = false;
+volatile uint32_t timerTickCount = 0;
+
+portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 
 void IRAM_ATTR onTimer()
 {
-    timer20msFlag = true;
+    portENTER_CRITICAL_ISR(&timerMux);
+
+    timerTickCount++;
+
+    portEXIT_CRITICAL_ISR(&timerMux);
 }
 
 
 // ============================================================
-// MOTION STATE MACHINE
+// 8. MOTION STATE MACHINE
 // ============================================================
 
 enum RobotState
@@ -508,21 +1260,48 @@ enum RobotState
     ERROR
 };
 
+
 RobotState state;
 
 bool motionActive = false;
 
 uint32_t motionStartTime = 0;
+
 uint32_t stateStartTime = 0;
-
-uint32_t motionDuration = 0;
-
-CylindricalPosition motionStart;
-CylindricalPosition motionTarget;
 
 
 // ============================================================
-// SERVO INITIALIZATION
+// 9. TRAJECTORY VARIABLES
+// ============================================================
+
+CylindricalPosition motionStart;
+
+CylindricalPosition motionTarget;
+
+CartesianXYZ cartStart;
+
+CartesianXYZ cartTarget;
+
+
+// Trapezoidal profile parameters
+
+float trajectoryLength = 0.0f;
+
+float accelerationTime = 0.0f;
+
+float constantVelocityTime = 0.0f;
+
+float peakVelocity = 0.0f;
+
+float accelerationDistance = 0.0f;
+
+float constantVelocityDistance = 0.0f;
+
+float totalTrajectoryTime = 0.0f;
+
+
+// ============================================================
+// 10. SERVO INITIALIZATION
 // ============================================================
 
 void initServos()
@@ -540,7 +1319,7 @@ void initServos()
 
 
 // ============================================================
-// SERVO CONTROL
+// 11. SERVO CONTROL
 // ============================================================
 
 void setServoAngle(int index, float angle)
@@ -550,7 +1329,8 @@ void setServoAngle(int index, float angle)
 
     angle = constrain(angle, 0.0f, 180.0f);
 
-    float pulseWidth = SERVO_MIN_US +
+    float pulseWidth =
+        SERVO_MIN_US +
         (angle / 180.0f) *
         (SERVO_MAX_US - SERVO_MIN_US);
 
@@ -562,7 +1342,7 @@ void setServoAngle(int index, float angle)
 
 
 // ============================================================
-// UPDATE JOINT ANGLES
+// 12. UPDATE ARM JOINTS
 // ============================================================
 
 void setJointAngles()
@@ -578,7 +1358,7 @@ void setJointAngles()
 
 
 // ============================================================
-// GRIPPER CONTROL
+// 13. GRIPPER CONTROL
 // ============================================================
 
 void openGripper()
@@ -598,7 +1378,7 @@ void closeGripper()
 
 
 // ============================================================
-// FORWARD KINEMATICS
+// 14. FORWARD KINEMATICS
 // ============================================================
 
 CylindricalPosition forwardKinematics()
@@ -623,23 +1403,74 @@ CylindricalPosition forwardKinematics()
         a3 * sinf(phi2) +
         a4 * sinf(phi3);
 
+
     position.z =
         d1 +
         a2 * cosf(phi1) +
         a3 * cosf(phi2) +
         a4 * cosf(phi3);
 
+
     position.base = theta[0];
+
 
     position.alpha =
         theta[1] + theta[2] + theta[3] - 90.0f;
+
 
     return position;
 }
 
 
 // ============================================================
-// INVERSE KINEMATICS
+// 15. COORDINATE CONVERSION
+// ============================================================
+
+CartesianXYZ cylindricalToCartesian(
+    CylindricalPosition pos
+)
+{
+    CartesianXYZ result;
+
+    float baseRad = pos.base * DEG_TO_RAD;
+
+    result.x = pos.r * cosf(baseRad);
+
+    result.y = pos.r * sinf(baseRad);
+
+    result.z = pos.z;
+
+    return result;
+}
+
+
+CylindricalPosition cartesianToCylindrical(
+    CartesianXYZ pos,
+    float alpha
+)
+{
+    CylindricalPosition result;
+
+    result.r = sqrtf(
+        pos.x * pos.x +
+        pos.y * pos.y
+    );
+
+    result.base = atan2f(
+        pos.y,
+        pos.x
+    ) * RAD_TO_DEG;
+
+    result.z = pos.z;
+
+    result.alpha = alpha;
+
+    return result;
+}
+
+
+// ============================================================
+// 16. INVERSE KINEMATICS
 // ============================================================
 
 bool inverseKinematics(
@@ -648,22 +1479,29 @@ bool inverseKinematics(
 )
 {
     // ----------------------------------------
-    // 1. Calculate wrist position
+    // Wrist position
     // ----------------------------------------
 
     float alphaRad = pos.alpha * DEG_TO_RAD;
 
-    float rw = pos.r - a4 * cosf(alphaRad);
+    float rw =
+        pos.r - a4 * cosf(alphaRad);
 
-    float zw = pos.z - d1 + a4 * sinf(alphaRad);
+    float zw =
+        pos.z - d1 + a4 * sinf(alphaRad);
 
 
     // ----------------------------------------
-    // 2. Calculate elbow angle
+    // Elbow angle
     // ----------------------------------------
 
     float D =
-        (rw * rw + zw * zw - a2 * a2 - a3 * a3)
+        (
+            rw * rw +
+            zw * zw -
+            a2 * a2 -
+            a3 * a3
+        )
         /
         (2.0f * a2 * a3);
 
@@ -686,7 +1524,7 @@ bool inverseKinematics(
 
 
     // ----------------------------------------
-    // 3. Calculate shoulder angle
+    // Shoulder angle
     // ----------------------------------------
 
     float q1 =
@@ -698,7 +1536,7 @@ bool inverseKinematics(
 
 
     // ----------------------------------------
-    // 4. Calculate wrist angle
+    // Wrist angle
     // ----------------------------------------
 
     float q3 =
@@ -707,7 +1545,7 @@ bool inverseKinematics(
 
 
     // ----------------------------------------
-    // 5. Convert to degrees
+    // Convert to degrees
     // ----------------------------------------
 
     float baseDeg = pos.base;
@@ -720,7 +1558,7 @@ bool inverseKinematics(
 
 
     // ----------------------------------------
-    // 6. Calculate physical servo angles
+    // Physical servo angles
     // ----------------------------------------
 
     float servoAngle[4];
@@ -735,13 +1573,15 @@ bool inverseKinematics(
 
 
     // ----------------------------------------
-    // 7. Servo limit checking
+    // Servo limits
     // ----------------------------------------
 
     for (int i = 0; i < 4; i++)
     {
-        if (servoAngle[i] < 0.0f ||
-            servoAngle[i] > 180.0f)
+        if (
+            servoAngle[i] < 0.0f ||
+            servoAngle[i] > 180.0f
+        )
         {
             return false;
         }
@@ -749,7 +1589,7 @@ bool inverseKinematics(
 
 
     // ----------------------------------------
-    // 8. Store joint angles
+    // Store logical joint angles
     // ----------------------------------------
 
     result[0] = baseDeg;
@@ -760,15 +1600,18 @@ bool inverseKinematics(
 
     result[3] = wristDeg;
 
+
     return true;
 }
 
 
 // ============================================================
-// APPLY INVERSE KINEMATICS
+// 17. APPLY INVERSE KINEMATICS
 // ============================================================
 
-bool setCartesianPosition(CylindricalPosition pos)
+bool setCartesianPosition(
+    CylindricalPosition pos
+)
 {
     float newAngles[4];
 
@@ -789,104 +1632,339 @@ bool setCartesianPosition(CylindricalPosition pos)
 
 
 // ============================================================
-// ANGLE INTERPOLATION
+// 18. CALCULATE TRAJECTORY PROFILE
 // ============================================================
 
-float interpolateAngle(float start, float target, float t)
+bool calculateTrajectoryProfile()
 {
-    float difference = target - start;
+    float dx = cartTarget.x - cartStart.x;
 
-    // Shortest angular path
+    float dy = cartTarget.y - cartStart.y;
 
-    while (difference > 180.0f)
-        difference -= 360.0f;
+    float dz = cartTarget.z - cartStart.z;
 
-    while (difference < -180.0f)
-        difference += 360.0f;
 
-    return start + difference * t;
+    trajectoryLength = sqrtf(
+        dx * dx +
+        dy * dy +
+        dz * dz
+    );
+
+
+    if (trajectoryLength < 0.001f)
+    {
+        accelerationTime = 0.0f;
+
+        constantVelocityTime = 0.0f;
+
+        peakVelocity = 0.0f;
+
+        accelerationDistance = 0.0f;
+
+        constantVelocityDistance = 0.0f;
+
+        totalTrajectoryTime = 0.0f;
+
+        return true;
+    }
+
+
+    float vmax = CARTESIAN_MAX_VELOCITY;
+
+    float accel = CARTESIAN_MAX_ACCEL;
+
+
+    // Required acceleration distance
+
+    float requiredAccelerationDistance =
+        vmax * vmax / (2.0f * accel);
+
+
+    // ----------------------------------------
+    // TRIANGULAR PROFILE
+    // ----------------------------------------
+
+    if (
+        2.0f * requiredAccelerationDistance
+        >= trajectoryLength
+    )
+    {
+        peakVelocity = sqrtf(
+            accel * trajectoryLength
+        );
+
+        accelerationTime =
+            peakVelocity / accel;
+
+        accelerationDistance =
+            0.5f * accel *
+            accelerationTime *
+            accelerationTime;
+
+        constantVelocityDistance = 0.0f;
+
+        constantVelocityTime = 0.0f;
+    }
+
+
+    // ----------------------------------------
+    // TRAPEZOIDAL PROFILE
+    // ----------------------------------------
+
+    else
+    {
+        peakVelocity = vmax;
+
+        accelerationTime =
+            vmax / accel;
+
+        accelerationDistance =
+            0.5f * accel *
+            accelerationTime *
+            accelerationTime;
+
+        constantVelocityDistance =
+            trajectoryLength -
+            2.0f * accelerationDistance;
+
+        constantVelocityTime =
+            constantVelocityDistance / vmax;
+    }
+
+
+    // Total duration
+
+    totalTrajectoryTime =
+        2.0f * accelerationTime +
+        constantVelocityTime;
+
+
+    Serial.println();
+
+    Serial.println("TRAJECTORY PROFILE");
+
+    Serial.printf(
+        "Distance: %.2f mm\n",
+        trajectoryLength
+    );
+
+    Serial.printf(
+        "Peak velocity: %.2f mm/s\n",
+        peakVelocity
+    );
+
+    Serial.printf(
+        "Acceleration time: %.3f s\n",
+        accelerationTime
+    );
+
+    Serial.printf(
+        "Constant velocity time: %.3f s\n",
+        constantVelocityTime
+    );
+
+    Serial.printf(
+        "Total movement time: %.3f s\n",
+        totalTrajectoryTime
+    );
+
+
+    return true;
 }
 
 
 // ============================================================
-// BEGIN CARTESIAN MOVEMENT
+// 19. CALCULATE PROFILE DISTANCE
+// ============================================================
+
+float calculateProfileDistance(float t)
+{
+    float accel = CARTESIAN_MAX_ACCEL;
+
+    float ta = accelerationTime;
+
+    float tc = constantVelocityTime;
+
+    float totalTime = totalTrajectoryTime;
+
+
+    // Acceleration phase
+
+    if (t < ta)
+    {
+        return 0.5f * accel * t * t;
+    }
+
+
+    // Constant velocity phase
+
+    else if (t < ta + tc)
+    {
+        float timeInConstantPhase = t - ta;
+
+        return accelerationDistance +
+               peakVelocity * timeInConstantPhase;
+    }
+
+
+    // Deceleration phase
+
+    else if (t < totalTime)
+    {
+        float remainingTime = totalTime - t;
+
+        return trajectoryLength -
+               0.5f * accel *
+               remainingTime *
+               remainingTime;
+    }
+
+
+    // Movement completed
+
+    return trajectoryLength;
+}
+
+
+// ============================================================
+// 20. BEGIN MOVEMENT
 // ============================================================
 
 void beginMovement(
     CylindricalPosition target,
-    uint32_t duration,
     RobotState newState
 )
 {
+    // Get current Cartesian position using FK
+
     motionStart = forwardKinematics();
 
     motionTarget = target;
 
-    motionDuration = duration;
 
-    motionStartTime = millis();
+    // Convert endpoints to Cartesian coordinates
+
+    cartStart = cylindricalToCartesian(
+        motionStart
+    );
+
+    cartTarget = cylindricalToCartesian(
+        motionTarget
+    );
+
 
     state = newState;
 
     motionActive = true;
 
-    Serial.println("Starting Cartesian movement...");
+
+    // Record start time
+
+    motionStartTime = micros();
+
+
+    // Calculate trajectory profile
+
+    calculateTrajectoryProfile();
+
+
+    Serial.println();
+
+    Serial.println("Starting movement...");
 }
 
 
 // ============================================================
-// SMOOTHSTEP TRAJECTORY
-// ============================================================
-
-float smoothStep(float t)
-{
-    return 3.0f * t * t - 2.0f * t * t * t;
-}
-
-
-// ============================================================
-// UPDATE CARTESIAN TRAJECTORY
+// 21. UPDATE CARTESIAN TRAJECTORY
 // ============================================================
 
 void updateMovement()
 {
-    uint32_t elapsed = millis() - motionStartTime;
+    // Elapsed time in seconds
 
-    float t = (float)elapsed / motionDuration;
-
-    if (t >= 1.0f)
-        t = 1.0f;
-
-    float s = smoothStep(t);
+    float elapsed =
+        (micros() - motionStartTime) * 0.000001f;
 
 
-    CylindricalPosition current;
+    // Handle zero-distance movement
 
-    current.r =
-        motionStart.r +
-        (motionTarget.r - motionStart.r) * s;
+    if (trajectoryLength < 0.001f)
+    {
+        if (!setCartesianPosition(motionTarget))
+        {
+            state = ERROR;
 
-    current.base =
-        interpolateAngle(
-            motionStart.base,
-            motionTarget.base,
-            s
-        );
+            motionActive = false;
+
+            return;
+        }
+
+        motionActive = false;
+
+        return;
+    }
+
+
+    // Calculate travelled distance
+
+    float travelledDistance =
+        calculateProfileDistance(elapsed);
+
+
+    // Normalized trajectory parameter
+
+    float s =
+        travelledDistance / trajectoryLength;
+
+    s = constrain(s, 0.0f, 1.0f);
+
+
+    // ----------------------------------------
+    // Cartesian interpolation
+    // ----------------------------------------
+
+    CartesianXYZ current;
+
+    current.x =
+        cartStart.x +
+        (cartTarget.x - cartStart.x) * s;
+
+    current.y =
+        cartStart.y +
+        (cartTarget.y - cartStart.y) * s;
 
     current.z =
-        motionStart.z +
-        (motionTarget.z - motionStart.z) * s;
+        cartStart.z +
+        (cartTarget.z - cartStart.z) * s;
 
-    current.alpha =
+
+    // ----------------------------------------
+    // Orientation interpolation
+    // ----------------------------------------
+
+    float currentAlpha =
         motionStart.alpha +
         (motionTarget.alpha - motionStart.alpha) * s;
 
 
-    // Calculate joint angles using IK
+    // ----------------------------------------
+    // Convert to cylindrical coordinates
+    // ----------------------------------------
 
-    if (!setCartesianPosition(current))
+    CylindricalPosition currentPosition =
+        cartesianToCylindrical(
+            current,
+            currentAlpha
+        );
+
+
+    // ----------------------------------------
+    // Inverse kinematics
+    // ----------------------------------------
+
+    if (!setCartesianPosition(currentPosition))
     {
-        Serial.println("ERROR: IK failed during trajectory!");
+        Serial.println("ERROR: IK failed during movement!");
 
         motionActive = false;
 
@@ -896,26 +1974,43 @@ void updateMovement()
     }
 
 
-    // Movement completed
+    // ----------------------------------------
+    // Movement completion
+    // ----------------------------------------
 
-    if (t >= 1.0f)
+    if (elapsed >= totalTrajectoryTime)
     {
+        // Ensure exact final position
+
+        if (!setCartesianPosition(motionTarget))
+        {
+            state = ERROR;
+
+            motionActive = false;
+
+            return;
+        }
+
         motionActive = false;
 
         Serial.println("Movement completed!");
 
+
         switch (state)
         {
+            // Move to pickup
+
             case MOVE_TO_START:
 
                 beginMovement(
                     PICKUP_POS,
-                    PICKUP_MOVE_TIME,
                     MOVE_TO_PICKUP
                 );
 
                 break;
 
+
+            // Close gripper
 
             case MOVE_TO_PICKUP:
 
@@ -927,6 +2022,8 @@ void updateMovement()
 
                 break;
 
+
+            // Move to drop-off
 
             case MOVE_TO_DROPOFF:
 
@@ -940,6 +2037,7 @@ void updateMovement()
 
 
             default:
+
                 break;
         }
     }
@@ -947,7 +2045,7 @@ void updateMovement()
 
 
 // ============================================================
-// SETUP
+// 22. SETUP
 // ============================================================
 
 void setup()
@@ -957,7 +2055,9 @@ void setup()
     Serial.println();
 
     Serial.println("================================");
+
     Serial.println("4-DOF ROBOT ARM CONTROLLER");
+
     Serial.println("================================");
 
 
@@ -966,17 +2066,21 @@ void setup()
     initServos();
 
 
-    // Set initial joint position
-
-    setJointAngles();
-
-
-    // Open gripper
+    // Initialize gripper
 
     openGripper();
 
 
-    // Initialize hardware timer
+    // Set initial joint positions
+
+    setJointAngles();
+
+
+    delay(1000);
+
+
+    // Initialize 20ms hardware timer
+    // Arduino ESP32 Core 3.x API
 
     timer = timerBegin(1000000);
 
@@ -985,7 +2089,10 @@ void setup()
     timerAlarm(timer, 20000, true, 0);
 
 
-    Serial.println("20ms control loop started!");
+    Serial.println("20ms timer started!");
+
+    Serial.println("Robot arm initialized!");
+
 
     delay(1000);
 
@@ -994,26 +2101,38 @@ void setup()
 
     beginMovement(
         START_POS,
-        START_MOVE_TIME,
         MOVE_TO_START
     );
 }
 
 
 // ============================================================
-// MAIN LOOP
+// 23. MAIN LOOP
 // ============================================================
 
 void loop()
 {
     // ----------------------------------------
-    // 20ms control loop
+    // Read timer ticks atomically
     // ----------------------------------------
 
-    if (timer20msFlag)
-    {
-        timer20msFlag = false;
+    uint32_t ticks;
 
+    portENTER_CRITICAL(&timerMux);
+
+    ticks = timerTickCount;
+
+    timerTickCount = 0;
+
+    portEXIT_CRITICAL(&timerMux);
+
+
+    // ----------------------------------------
+    // 20ms trajectory control
+    // ----------------------------------------
+
+    if (ticks > 0)
+    {
         if (motionActive)
         {
             updateMovement();
@@ -1027,11 +2146,13 @@ void loop()
 
     if (state == CLOSE_GRIPPER)
     {
-        if (millis() - stateStartTime >= GRIPPER_DELAY)
+        if (
+            millis() - stateStartTime
+            >= GRIPPER_DELAY
+        )
         {
             beginMovement(
                 DROPOFF_POS,
-                DROPOFF_MOVE_TIME,
                 MOVE_TO_DROPOFF
             );
         }
@@ -1044,13 +2165,19 @@ void loop()
 
     if (state == OPEN_GRIPPER)
     {
-        if (millis() - stateStartTime >= GRIPPER_DELAY)
+        if (
+            millis() - stateStartTime
+            >= GRIPPER_DELAY
+        )
         {
             state = FINISHED;
 
             Serial.println();
+
             Serial.println("==============================");
+
             Serial.println("PICK AND PLACE COMPLETED!");
+
             Serial.println("==============================");
         }
     }
@@ -1062,8 +2189,9 @@ void loop()
 
     if (state == ERROR)
     {
-        // Stop generating new movement commands.
-
         motionActive = false;
+
+        // Do not issue further motion commands.
+
     }
 }
