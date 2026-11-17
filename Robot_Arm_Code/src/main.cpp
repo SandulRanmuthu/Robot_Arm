@@ -1,7 +1,18 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
+#include "matrix.h"
+#include "math.h"
 
+
+
+float r_ = 0.0f;
+float z_ = 0.0f;
+float alpha_ = 0.0f;
+float theta_ = 0.0f;
+
+
+bool angle_limit = false;
 
 // ==================================================
 // PCA9685 CONFIGURATION
@@ -44,7 +55,7 @@ volatile bool timer20msFlag = false;
 // ==================================================
 
 float theta[NUM_SERVOS] = {
-    0, 0, 0, 0, 0
+    0, 0, 45, 0, 0
 };
 
 float thetadot[NUM_SERVOS] = {
@@ -86,8 +97,7 @@ void setServoAngle(int index, float angle)
     if (index < 0 || index >= NUM_SERVOS)
         return;
 
-    // Limit servo angle
-    // angle = constrain(angle, 0.0f, 180.0f);
+    angle = constrain(angle, 0.0f, 180.0f);
 
     // Convert angle to pulse width
     float pulseWidth = SERVO_MIN_US +
@@ -106,13 +116,15 @@ void setServoAngle(int index, float angle)
 // UPDATE ALL JOINT ANGLES
 // ==================================================
 
+float offset[NUM_SERVOS] = {90.0f, 102.0f, -160.0f, 106.0f, 90.0f};
+
 void setJointAngles()
 {
-    setServoAngle(0, theta[0] +90);
-    setServoAngle(1, theta[1] +102);
-    setServoAngle(2, -theta[2] +104);
-    setServoAngle(3, theta[3] +106);
-    setServoAngle(4, theta[4] +90);
+    setServoAngle(0, theta[0] +offset[0]);
+    setServoAngle(1, theta[1] +offset[1]);
+    setServoAngle(2, -(theta[2] +offset[2]));
+    setServoAngle(3, theta[3] +offset[3]);
+    setServoAngle(4, theta[4] +offset[4]);
 }
 
 
@@ -122,10 +134,28 @@ void setJointAngles()
 
 void calcNewAngles()
 {
+    float thetatt[NUM_SERVOS] = {theta[0], theta[1], theta[2], theta[3], theta[4]};
     for (int i = 0; i < NUM_SERVOS; i++)
     {
-        theta[i] += thetadot[i] * CYCLE_TIME;
+        if(i == 2) {
+            thetatt[i] += thetadot[i] * CYCLE_TIME;
+            if (-(thetatt[i]+offset[i]) < 0.0f || -(thetatt[i]+offset[i]) > 180.0f) {
+                angle_limit = true;
+                return;
+            }
+        } 
+        else {
+            thetatt[i] += thetadot[i] * CYCLE_TIME;
+            if (thetatt[i]+offset[i] < 0.0f || thetatt[i]+offset[i] > 180.0f) {
+                angle_limit = true;
+                return;
+            }
+        }
     }
+
+    for (int i = 0; i < NUM_SERVOS; i++)
+        theta[i] = thetatt[i];
+    
 }
 
 
@@ -133,8 +163,54 @@ void calcNewAngles()
 // VELOCITY KINEMATICS
 // ==================================================
 
+
 void calcVelKinamatics()
 {
+    // float d1 = 83.42;
+    float d2 = 101.95;
+    float d3 = 61.95;
+    float d4 = 72.00;
+
+    float theta1rad = theta[1] * DEG_TO_RAD;
+    float theta2rad = theta[2] * DEG_TO_RAD;
+    float theta3rad = theta[3] * DEG_TO_RAD;
+
+    float J[3][3] = {
+        {d2*cosf(theta1rad)+d3*cosf(theta1rad+theta2rad)+d4*cosf(theta1rad+theta2rad+theta3rad), d3*cosf(theta1rad+theta2rad)+d4*cosf(theta1rad+theta2rad+theta3rad), d4*cosf(theta1rad+theta2rad+theta3rad)},
+        {-d2*sinf(theta1rad)-d3*sinf(theta1rad+theta2rad)-d4*sinf(theta1rad+theta2rad+theta3rad), -d3*sinf(theta1rad+theta2rad)-d4*sinf(theta1rad+theta2rad+theta3rad), -d4*sinf(theta1rad+theta2rad+theta3rad)},
+        {-1, -1, -1}
+    };
+
+    float Xdot[3] = {
+        r_, z_, alpha_
+    }; //(r,z,alpha)
+
+    float Jinv[3][3];
+    float qdot[3];
+
+    if (matrixInverse(J, Jinv))
+    {
+        matrixVectorMultiply(Jinv, Xdot, qdot);
+
+        // Serial.println("Joint velocities:");
+
+        // for (int i = 0; i < 3; i++)
+        // {
+        //     // Serial.println(qdot[i]);
+        // }
+
+        thetadot[1] = qdot[0] *RAD_TO_DEG;
+        thetadot[2] = qdot[1] *RAD_TO_DEG;
+        thetadot[3] = qdot[2] *RAD_TO_DEG;
+        thetadot[0] = theta_;
+    }
+    else
+    {
+        // Serial.println("Jacobian is singular!");
+    }
+
+
+
 
 }
 
@@ -152,6 +228,8 @@ void IRAM_ATTR onTimer()
 // ==================================================
 // SETUP
 // ==================================================
+
+uint32_t tt = 0;
 
 void setup()
 {
@@ -174,23 +252,81 @@ void setup()
     Serial.println("Robot arm initialized!");
 
     delay(1000);
+
+    r_ = -60.0f;
+    z_ = 0.0f;
+    alpha_ = 0.0f;
+    theta_ = 0.0f;
+
+    tt = millis();
+
 }
 
 
 // ==================================================
 // MAIN LOOP
 // ==================================================
+int counter = 0;
 
 void loop()
 {
     if (timer20msFlag)
     {
         timer20msFlag = false;
-
         calcVelKinamatics();
-
         calcNewAngles();
-
         setJointAngles();
     }
+
+    if (angle_limit) {
+        r_ = 0.0f;
+        z_ = 0.0f;
+        alpha_ = 0.0f;
+        theta_ = 0.0f;
+
+        // if(counter == 0) {
+        //     r_ = +40.0f;
+        // }
+        // else if(counter == 1) {
+        //     z_ = -40.0f;
+        // }
+        // else if(counter == 2) {
+        //     z_ = +40.0f;
+        // }
+        // counter++;
+        // angle_limit = false;
+    }
+
+    if(millis() - tt < 2000) {
+        r_ = -60.0f;
+        z_ = 0.0f;
+        alpha_ = 0.0f;
+        theta_ = 0.0f;
+    }
+    else if (millis() - tt < 4000) {
+        r_ = +60.0f;
+        z_ = 0.0f;
+        alpha_ = 0.0f;
+        theta_ = 0.0f;
+    }
+    else if (millis() - tt < 6000) {
+        r_ = 0.0f;
+        z_ = -60.0f;
+        alpha_ = 0.0f;
+        theta_ = 0.0f;
+    }
+    else if (millis() - tt < 8000) {
+        r_ = 0.0f;
+        z_ = +40.0f;
+        alpha_ = 0.0f;
+        theta_ = 0.0f;
+    }
+    else{
+        r_ = 0.0f;
+        z_ = +0.0f;
+        alpha_ = 0.0f;
+        theta_ = 0.0f;
+    }
+
+
 }
