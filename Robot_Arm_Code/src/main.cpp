@@ -55,7 +55,7 @@ volatile bool timer20msFlag = false;
 // ==================================================
 
 float theta[NUM_SERVOS] = {
-    0, 0, 45, 45, 0
+    0, 0, 0, 0, 0
 };
 
 float thetadot[NUM_SERVOS] = {
@@ -116,7 +116,7 @@ void setServoAngle(int index, float angle)
 // UPDATE ALL JOINT ANGLES
 // ==================================================
 
-float offset[NUM_SERVOS] = {90.0f, 102.0f, -160.0f, 106.0f, 90.0f};
+float offset[NUM_SERVOS] = {90.0f, 54.0f, -160.0f, 106.0f, 90.0f};
 
 void setJointAngles()
 {
@@ -273,7 +273,7 @@ void loop()
     if (timer20msFlag)
     {
         timer20msFlag = false;
-        calcVelKinamatics();
+        // calcVelKinamatics();
         calcNewAngles();
         setJointAngles();
     }
