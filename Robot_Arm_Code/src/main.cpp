@@ -391,13 +391,7 @@ const int servoChannels[NUM_SERVOS] = {
 
 // Servo offsets
 
-const float offset[NUM_SERVOS] = {
-    90.0f,
-    102.0f,
-    -160.0f,
-    106.0f,
-    90.0f
-};
+const float offset[NUM_SERVOS] = {90.0f, 54.0f, -160.0f, 106.0f, 90.0f};
 
 // Gripper physical servo angles
 // Adjust these according to your gripper mechanism.
@@ -454,7 +448,7 @@ const CylindricalPosition START_POS = {
 const CylindricalPosition PICKUP_POS = {
     200.0f,
     0.0f,
-    40.0f,
+    10.0f,
     0.0f
 };
 
