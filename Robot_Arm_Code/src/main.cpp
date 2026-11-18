@@ -75,7 +75,7 @@ struct CylindricalPosition {
 // Alpha = 0 means the orientation specified by your report.
 
 const CylindricalPosition START_POS = {
-    100.0f, 0.0f, 200.0f, 0.0f
+    170.0f, 0.0f, 10.0f, 0.0f
 };
 
 const CylindricalPosition PICKUP_POS = {
@@ -84,6 +84,10 @@ const CylindricalPosition PICKUP_POS = {
 
 const CylindricalPosition DROPOFF_POS = {
     150.0f, 90.0f, 220.0f, 0.0f
+};
+
+const CylindricalPosition END_POS = {
+    0.0f, 90.0f, 220.0f, 0.0f
 };
 
 // ============================================================
@@ -105,7 +109,8 @@ const CylindricalPosition DROPOFF_POS = {
 #define ALPHA_MAX_VELOCITY    90.0f  // deg/s
 #define ALPHA_MAX_ACCEL      180.0f  // deg/s^2
 
-#define GRIPPER_DELAY 1000UL
+#define GRIPPER_DELAY_CLOSE 1000UL // wait 1 second after closing gripper 
+#define GRIPPER_DELAY_OPEN 200UL // wait 0.2 second after opening gripper
 
 // Select elbow configuration
 #define ELBOW_POSITIVE true
@@ -135,6 +140,7 @@ enum RobotState {
     CLOSE_GRIPPER,
     MOVE_TO_DROPOFF,
     OPEN_GRIPPER,
+    Move_TO_END,
     FINISHED,
     ERROR
 };
@@ -234,7 +240,7 @@ void closeGripper() {
 // ============================================================
 // 14. FORWARD KINEMATICS
 // ============================================================
-
+// Returns the current cylindrical position of the end-effector
 CylindricalPosition forwardKinematics() {
     float q1 = theta[1] * DEG_TO_RAD;
     float q2 = theta[2] * DEG_TO_RAD;
@@ -268,7 +274,8 @@ CylindricalPosition forwardKinematics() {
 // ============================================================
 // 15. INVERSE KINEMATICS
 // ============================================================
-
+// calculates the joint angles for a given cylindrical position
+// Returns true if the position is reachable, false otherwise
 bool inverseKinematics(CylindricalPosition pos, float result[4]) {
     // Wrist position
     float alphaRad = pos.alpha * DEG_TO_RAD;
@@ -291,7 +298,7 @@ bool inverseKinematics(CylindricalPosition pos, float result[4]) {
     float q2 = acosf(D);
 
     if (!ELBOW_POSITIVE) {
-        q2 = -q2;
+        q2 = -q2; // Elbow down configuration
     }
 
     // Shoulder angle
@@ -340,10 +347,7 @@ bool inverseKinematics(CylindricalPosition pos, float result[4]) {
 // ============================================================
 // 16. APPLY INVERSE KINEMATICS
 // ============================================================
-
-// Kept with the original function name to minimize changes
-// to the rest of the sketch. The input is cylindrical, not Cartesian.
-
+// Sets the joint angles for a given cylindrical position by applying inverse kinematics
 bool setCartesianPosition(CylindricalPosition pos) {
     float newAngles[4];
 
@@ -374,7 +378,7 @@ void calculateProfile(
     profile.maxVelocity = maxVelocity;
     profile.acceleration = acceleration;
 
-    if (profile.distance < 0.001f) {
+    if (profile.distance < 0.001f) { // Handle zero distance case
         profile.peakVelocity = 0.0f;
         profile.accelerationTime = 0.0f;
         profile.constantVelocityTime = 0.0f;
@@ -429,20 +433,20 @@ void calculateProfile(
 // ============================================================
 // 18. CALCULATE POSITION ALONG AN INDIVIDUAL PROFILE
 // ============================================================
-
+// Returns the position along the profile at time t (seconds)
 float calculateProfilePosition(
     const TrapezoidalProfile &profile,
     float t
 ) {
-    if (profile.distance < 0.001f) {
+    if (profile.distance < 0.001f) { // Handle zero distance case
         return 0.0f;
     }
 
-    if (t <= 0.0f) {
+    if (t <= 0.0f) { // Handle negative time case
         return 0.0f;
     }
 
-    if (t >= profile.totalTime) {
+    if (t >= profile.totalTime) { // Handle time beyond total time case
         return profile.distance * profile.direction;
     }
 
@@ -473,7 +477,7 @@ float calculateProfilePosition(
             0.5f * accel * remainingTime * remainingTime;
     }
 
-    return travelled * profile.direction;
+    return travelled * profile.direction; // always return positive distance, regardless of direction
 }
 
 // ============================================================
@@ -545,7 +549,7 @@ void calculateCylindricalTrajectory() {
 // ============================================================
 // 20. BEGIN MOVEMENT
 // ============================================================
-
+// Starts a new movement to the specified target position with the given state
 void beginMovement(
     CylindricalPosition target,
     RobotState newState
@@ -568,7 +572,7 @@ void beginMovement(
 // ============================================================
 // 21. HANDLE MOVEMENT COMPLETION
 // ============================================================
-
+// Called when the current movement is completed, to transition to the next state
 void handleMovementComplete() {
     motionActive = false;
 
@@ -591,6 +595,15 @@ void handleMovementComplete() {
             state = OPEN_GRIPPER;
             break;
 
+        case Move_TO_END:
+            state = FINISHED;
+            Serial.println();
+            Serial.println("==============================");
+            Serial.println("PICK AND PLACE COMPLETED!");
+            Serial.println("==============================");
+            
+            break;
+
         default:
             break;
     }
@@ -599,7 +612,7 @@ void handleMovementComplete() {
 // ============================================================
 // 22. UPDATE CYLINDRICAL TRAJECTORY
 // ============================================================
-
+// Updates the current position along the trajectory based on elapsed time(write to servos)
 void updateMovement() {
     // Elapsed time in seconds. Unsigned subtraction handles micros() rollover.
     float elapsed =
@@ -623,7 +636,7 @@ void updateMovement() {
         motionStart.alpha +
         calculateProfilePosition(profileAlpha, elapsed);
 
-    // Apply inverse kinematics to the current cylindrical setpoint.
+    // Apply inverse kinematics to the current cylindrical setpoint. And write to the servos.
     if (!setCartesianPosition(current)) {
         Serial.println("ERROR: IK failed during movement!");
 
@@ -656,7 +669,7 @@ void setup() {
     Serial.println();
     Serial.println("================================");
     Serial.println("4-DOF ROBOT ARM CONTROLLER");
-    Serial.println("CYLINDRICAL TRAJECTORY PLANNING");
+    Serial.println("WITH CYLINDRICAL TRAJECTORY PLANNING");
     Serial.println("================================");
 
     // Initialize PCA9685
@@ -712,20 +725,15 @@ void loop() {
 
     // Gripper closing delay.
     if (state == CLOSE_GRIPPER) {
-        if ((uint32_t)(millis() - stateStartTime) >= GRIPPER_DELAY) {
+        if ((uint32_t)(millis() - stateStartTime) >= GRIPPER_DELAY_CLOSE) {
             beginMovement(DROPOFF_POS, MOVE_TO_DROPOFF);
         }
     }
 
     // Gripper opening delay.
     if (state == OPEN_GRIPPER) {
-        if ((uint32_t)(millis() - stateStartTime) >= GRIPPER_DELAY) {
-            state = FINISHED;
-
-            Serial.println();
-            Serial.println("==============================");
-            Serial.println("PICK AND PLACE COMPLETED!");
-            Serial.println("==============================");
+        if ((uint32_t)(millis() - stateStartTime) >= GRIPPER_DELAY_OPEN) {
+            beginMovement(END_POS, Move_TO_END);
         }
     }
 
