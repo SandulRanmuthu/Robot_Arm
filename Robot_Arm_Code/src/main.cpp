@@ -82,12 +82,16 @@ const CylindricalPosition PICKUP_POS = {
     200.0f, 0.0f, 10.0f, 0.0f
 };
 
-const CylindricalPosition DROPOFF_POS = {
+const CylindricalPosition TOP_POS = {
     150.0f, 90.0f, 220.0f, 0.0f
 };
 
+const CylindricalPosition DROPOFF_POS = {
+    150.0f, 90.0f, 105.0f, 0.0f
+};
+
 const CylindricalPosition END_POS = {
-    0.0f, 90.0f, 220.0f, 0.0f
+    0.0f, 90.0f, 200.0f, 0.0f
 };
 
 // ============================================================
@@ -138,9 +142,10 @@ enum RobotState {
     MOVE_TO_START,
     MOVE_TO_PICKUP,
     CLOSE_GRIPPER,
+    MOVE_TO_TOP,
     MOVE_TO_DROPOFF,
     OPEN_GRIPPER,
-    Move_TO_END,
+    MOVE_TO_END,
     FINISHED,
     ERROR
 };
@@ -477,7 +482,7 @@ float calculateProfilePosition(
             0.5f * accel * remainingTime * remainingTime;
     }
 
-    return travelled * profile.direction; // always return positive distance, regardless of direction
+    return travelled * profile.direction;
 }
 
 // ============================================================
@@ -589,13 +594,17 @@ void handleMovementComplete() {
             state = CLOSE_GRIPPER;
             break;
 
+        case MOVE_TO_TOP:
+            beginMovement(DROPOFF_POS, MOVE_TO_DROPOFF);
+            break;
+
         case MOVE_TO_DROPOFF:
             openGripper();
             stateStartTime = millis();
             state = OPEN_GRIPPER;
             break;
 
-        case Move_TO_END:
+        case MOVE_TO_END:
             state = FINISHED;
             Serial.println();
             Serial.println("==============================");
@@ -677,6 +686,9 @@ void setup() {
 
     // Initialize gripper
     openGripper();
+    // delay(10000);
+    // closeGripper();
+    // delay(10000);
 
     // Set initial joint positions
     setJointAngles();
@@ -726,14 +738,14 @@ void loop() {
     // Gripper closing delay.
     if (state == CLOSE_GRIPPER) {
         if ((uint32_t)(millis() - stateStartTime) >= GRIPPER_DELAY_CLOSE) {
-            beginMovement(DROPOFF_POS, MOVE_TO_DROPOFF);
+            beginMovement(TOP_POS, MOVE_TO_TOP);
         }
     }
 
     // Gripper opening delay.
     if (state == OPEN_GRIPPER) {
         if ((uint32_t)(millis() - stateStartTime) >= GRIPPER_DELAY_OPEN) {
-            beginMovement(END_POS, Move_TO_END);
+            beginMovement(END_POS, MOVE_TO_END);
         }
     }
 
